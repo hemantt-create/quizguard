@@ -4,28 +4,68 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { getCurrentTimestamp, saveStoredAdmin } from "@/lib/quiz-storage";
+import { fetchAdminProfileByEmail } from "@/lib/admin-auth";
+import { clearStoredAdmin } from "@/lib/quiz-storage";
+import { supabase } from "@/src/lib/supabase";
 
 export default function AdminLoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function handleLogin(event: FormEvent<HTMLFormElement>) {
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setIsSubmitting(true);
 
-    if (!email.trim()) {
-      setError("Please enter admin email.");
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !password) {
+      setIsSubmitting(false);
+      setError("Please enter admin email and password.");
       return;
     }
 
-    saveStoredAdmin({
-      email: email.trim(),
-      loginTime: new Date(getCurrentTimestamp()).toISOString(),
-    });
+    if (!supabase) {
+      setIsSubmitting(false);
+      setError("Supabase is not configured. Please check environment keys.");
+      return;
+    }
 
+    const { data, error: signInError } =
+      await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+
+    if (signInError) {
+      setIsSubmitting(false);
+      setError(signInError.message);
+      return;
+    }
+
+    const signedInEmail = data.user?.email?.toLowerCase() ?? normalizedEmail;
+    const adminResult = await fetchAdminProfileByEmail(signedInEmail);
+
+    if (adminResult.error) {
+      await supabase.auth.signOut();
+      clearStoredAdmin();
+      setIsSubmitting(false);
+      setError(`Unable to verify admin access: ${adminResult.error}`);
+      return;
+    }
+
+    if (!adminResult.data) {
+      await supabase.auth.signOut();
+      clearStoredAdmin();
+      setIsSubmitting(false);
+      setError("This email is not authorized as an admin.");
+      return;
+    }
+
+    clearStoredAdmin();
     router.push("/admin/dashboard");
   }
 
@@ -55,6 +95,7 @@ export default function AdminLoginPage() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="admin@uitrgpv.ac.in"
+              disabled={isSubmitting}
               className="mt-2 h-12 w-full rounded-lg border border-[#cbd5e1] bg-white px-4 text-base outline-none transition placeholder:text-[#94a3b8] focus:border-[#101828] focus:ring-4 focus:ring-[#101828]/10"
             />
           </div>
@@ -72,7 +113,8 @@ export default function AdminLoginPage() {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="Placeholder password"
+              placeholder="Supabase admin password"
+              disabled={isSubmitting}
               className="mt-2 h-12 w-full rounded-lg border border-[#cbd5e1] bg-white px-4 text-base outline-none transition placeholder:text-[#94a3b8] focus:border-[#101828] focus:ring-4 focus:ring-[#101828]/10"
             />
           </div>
@@ -85,9 +127,10 @@ export default function AdminLoginPage() {
 
           <button
             type="submit"
-            className="h-12 w-full rounded-lg bg-[#101828] px-5 text-base font-semibold text-white shadow-sm transition hover:bg-[#253044]"
+            disabled={isSubmitting}
+            className="h-12 w-full rounded-lg bg-[#101828] px-5 text-base font-semibold text-white shadow-sm transition hover:bg-[#253044] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Admin Login
+            {isSubmitting ? "Checking Admin Access..." : "Admin Login"}
           </button>
         </form>
       </section>

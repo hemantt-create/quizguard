@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { EmptyState } from "@/app/_components/empty-state";
 import { AdminGuard } from "@/app/admin/_components/admin-guard";
 import { clearStoredAdmin, formatDateTime } from "@/lib/quiz-storage";
 import { useSupabaseQuizzes } from "@/lib/use-supabase-quizzes";
-import { useStoredAdminIdentity } from "@/lib/use-local-identity";
+import { supabase } from "@/src/lib/supabase";
 
 const adminCards = [
   {
@@ -38,9 +39,35 @@ const adminCards = [
 function AdminDashboardContent() {
   const router = useRouter();
   const { quizzes, hasLoaded, error } = useSupabaseQuizzes();
-  const { admin, hasLoaded: hasLoadedAdmin } = useStoredAdminIdentity();
+  const [adminEmail, setAdminEmail] = useState("");
 
-  function handleLogout() {
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadAdminSession() {
+      if (!supabase) {
+        return;
+      }
+
+      const { data } = await supabase.auth.getSession();
+
+      if (isMounted) {
+        setAdminEmail(data.session?.user.email ?? "");
+      }
+    }
+
+    void loadAdminSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  async function handleLogout() {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+
     clearStoredAdmin();
     router.push("/admin/login");
   }
@@ -69,7 +96,7 @@ function AdminDashboardContent() {
               Logged-in admin
             </p>
             <p className="mt-1 text-xl font-semibold text-[#101828]">
-              {hasLoadedAdmin && admin ? admin.email : "No admin email saved"}
+              {adminEmail || "Authenticated admin"}
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
