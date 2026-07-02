@@ -33,6 +33,8 @@ const optionLabels: CorrectOption[] = ["A", "B", "C", "D"];
 const defaultMaxTabSwitches = 3;
 const violationCooldownMs = 1000;
 const watermarkTileCount = 36;
+const duplicateAttemptMessage =
+  "You have already attempted this quiz. Multiple attempts are not allowed.";
 
 function getOptionText(
   quizQuestion: Quiz["questions"][number],
@@ -120,6 +122,7 @@ function StudentQuizAttemptContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [warningMessage, setWarningMessage] = useState("");
+  const [submissionBlockMessage, setSubmissionBlockMessage] = useState("");
   const [isPrivacyOverlayVisible, setIsPrivacyOverlayVisible] =
     useState(false);
   const selectedAnswersRef = useRef<Record<number, CorrectOption>>({});
@@ -174,6 +177,12 @@ function StudentQuizAttemptContent() {
     );
   }
 
+  const exitFullscreenIfNeeded = useCallback(async () => {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
+    }
+  }, []);
+
   const submitAttempt = useCallback(
     async (forcedStatus?: AttemptStatus) => {
       const activeQuiz = quizRef.current;
@@ -190,6 +199,7 @@ function StudentQuizAttemptContent() {
       isQuizActiveRef.current = false;
       setIsSubmitting(true);
       setIsPrivacyOverlayVisible(false);
+      setSubmissionBlockMessage("");
 
       const answers = selectedAnswersRef.current;
       let score = 0;
@@ -255,16 +265,27 @@ function StudentQuizAttemptContent() {
         violationLogs: violationLogsRef.current,
       };
 
-      saveStoredAttempt(attempt);
-
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-      }
-
       try {
         const result = await saveSupabaseAttempt(attempt);
 
         if (result.error) {
+          if (result.code === "23505") {
+            await exitFullscreenIfNeeded();
+            setSubmissionBlockMessage(duplicateAttemptMessage);
+            setIsSubmitting(false);
+            return;
+          }
+
+          if (result.code !== "SUPABASE_NOT_CONFIGURED") {
+            await exitFullscreenIfNeeded();
+            console.warn("Supabase attempt save failed.", result.error);
+            setSubmissionBlockMessage(
+              "Unable to submit this quiz right now. Please contact your faculty coordinator.",
+            );
+            setIsSubmitting(false);
+            return;
+          }
+
           console.warn(
             "Attempt saved locally, but Supabase save failed.",
             result.error,
@@ -277,11 +298,13 @@ function StudentQuizAttemptContent() {
         );
       }
 
+      saveStoredAttempt(attempt);
+      await exitFullscreenIfNeeded();
       router.push(
         `/student/quiz/${activeQuiz.id}/result?attemptId=${attemptId}`,
       );
     },
-    [router],
+    [exitFullscreenIfNeeded, router],
   );
 
   const recordViolation = useCallback(
@@ -840,6 +863,30 @@ function StudentQuizAttemptContent() {
           <p className="mt-3 text-sm leading-6 text-[#64748b]">
             This quiz does not have any questions saved.
           </p>
+        </section>
+      </main>
+    );
+  }
+
+  if (submissionBlockMessage) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-[#f6f7fb] px-6 py-10 text-[#17202a]">
+        <section className="w-full max-w-2xl rounded-lg border border-[#dfe5ec] bg-white p-8 text-center shadow-sm">
+          <p className="text-sm font-medium text-[#64748b]">
+            QuizGuard - Electrical Department, UIT RGPV Bhopal
+          </p>
+          <h1 className="mt-3 text-3xl font-bold text-[#101828]">
+            Attempt not submitted
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-[#64748b]">
+            {submissionBlockMessage}
+          </p>
+          <Link
+            href="/student/dashboard"
+            className="mt-6 inline-flex h-11 items-center justify-center rounded-lg bg-[#101828] px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#253044]"
+          >
+            Back to Student Dashboard
+          </Link>
         </section>
       </main>
     );

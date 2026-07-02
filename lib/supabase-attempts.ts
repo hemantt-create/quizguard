@@ -34,9 +34,11 @@ type SupabaseAttemptRow = {
 type SupabaseAttemptResult =
   | {
       error: null;
+      code?: null;
     }
   | {
       error: string;
+      code?: string;
     };
 
 type SupabaseAttemptsResult =
@@ -203,6 +205,7 @@ export async function saveSupabaseAttempt(
   if (!supabase) {
     return {
       error: "Supabase client is not configured.",
+      code: "SUPABASE_NOT_CONFIGURED",
     };
   }
 
@@ -230,8 +233,16 @@ export async function saveSupabaseAttempt(
     created_at: attempt.submittedAt,
   });
 
+  if (error) {
+    return {
+      error: error.message,
+      code: error.code,
+    };
+  }
+
   return {
-    error: error?.message ?? null,
+    error: null,
+    code: null,
   };
 }
 
